@@ -25,44 +25,56 @@ local function fetchUrl(url)
     return nil
 end
 
-local function safeRun(code)
-    if not code or #code == 0 then return false end
+local function safeCompile(code)
+    if not code or #code == 0 then return nil end
     local ld = load or loadstring
-    if not ld then return false end
+    if not ld then return nil end
     local fn, err = ld(code, "remote")
-    if not fn then return false end
-    local ok = pcall(fn)
-    return ok
+    if not fn then return nil end
+    return fn
 end
 
 local RunService = game:GetService("RunService")
-
-local function loadRemote(url, attempts)
-    attempts = attempts or 2
-    for i = 1, attempts do
-        local body = fetchUrl(url)
-        if body then
-            local done = false
-            local conn
-            conn = RunService.Heartbeat:Connect(function()
-                done = true
-                conn:Disconnect()
-            end)
-            local t0 = tick()
-            while not done and tick() - t0 < 1 do task.wait(0) end
-            task.spawn(function() safeRun(body) end)
-            return true
-        else
-            task.wait(0.12)
-        end
-    end
-    return false
-end
+local bodies = {}
+local fetchThreads = {}
 
 for i, u in ipairs(urls) do
-    task.spawn(function()
-        loadRemote(u, 3)
+    fetchThreads[i] = task.spawn(function()
+        bodies[i] = fetchUrl(u)
     end)
-    task.wait(0.06)
+    task.wait(0.04)
 end
-```0
+
+local timeout = 8
+local t0 = tick()
+while (not (bodies[1] and bodies[2])) and tick() - t0 < timeout do
+    task.wait(0.05)
+end
+
+local function waitHeartbeats(n)
+    n = n or 3
+    for i = 1, n do
+        local done = false
+        local conn
+        conn = RunService.Heartbeat:Connect(function()
+            done = true
+            conn:Disconnect()
+        end)
+        local tstart = tick()
+        while not done and tick() - tstart < 1 do task.wait(0) end
+    end
+end
+
+for i = 1, #urls do
+    local code = bodies[i]
+    if code then
+        local fn = safeCompile(code)
+        if fn then
+            task.spawn(fn)
+        end
+    end
+    if i < #urls then
+        waitHeartbeats(6)
+        task.wait(0.9)
+    end
+end
